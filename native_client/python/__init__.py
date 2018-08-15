@@ -20,7 +20,9 @@ class Model(object):
             self._impl = None
 
     def enableDecoderWithLM(self, *args, **kwargs):
-        return deepspeech.impl.EnableDecoderWithLM(self._impl, *args, **kwargs)
+        status = deepspeech.impl.EnableDecoderWithLM(self._impl, *args, **kwargs)
+        if status != 0:
+            raise RuntimeError("EnableDecoderWithLM failed with error code {}".format(status))
 
     def stt(self, *args, **kwargs):
         return deepspeech.impl.SpeechToText(self._impl, *args, **kwargs)
