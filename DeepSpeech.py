@@ -237,6 +237,9 @@ def initialize_globals():
     if len(FLAGS.checkpoint_dir) == 0:
         FLAGS.checkpoint_dir = xdg.save_data_path(os.path.join('deepspeech','checkpoints'))
 
+    global best_validation_save_path
+    best_validation_save_path = os.path.join(FLAGS.checkpoint_dir, 'best_validation')
+
     # Set default summary dir
     if len(FLAGS.summary_dir) == 0:
         FLAGS.summary_dir = xdg.save_data_path(os.path.join('deepspeech','summaries'))
@@ -917,6 +920,15 @@ class WorkerJob(object):
     def __str__(self):
         return 'Job (ID: %d, worker: %d, epoch: %d, set_name: %s)' % (self.id, self.worker, self.index, self.set_name)
 
+best_validation_loss = float('inf')
+best_validation_saver = None
+
+def get_session(sess):
+    session = sess
+    while session is not None and type(session).__name__ != 'Session':
+        session = session._sess
+    return session
+
 class Epoch(object):
     '''Represents an epoch that should be executed by the Training Coordinator.
     Creates `num_jobs` `WorkerJob` instances in state 'open'.
@@ -1021,6 +1033,13 @@ class Epoch(object):
                         self.samples.extend(job.samples)
 
                 self.loss = agg_loss / num_jobs
+
+                global best_validation_loss
+                if self.set_name == 'dev':
+                    if self.loss < best_validation_loss:
+                        best_validation_loss = self.loss
+                        path = best_validation_saver.save(sess=get_session(train_session), save_path=best_validation_save_path, write_state=False, latest_filename='foobarbaz')
+                        log_info('Saving model with best validation loss ({}) at {}...'.format(best_validation_loss, path))
 
                 # if the job was for validation dataset then append it to the COORD's _loss for early stop verification
                 if (FLAGS.early_stop is True) and (self.set_name == 'dev'):
@@ -1517,7 +1536,7 @@ def train(server=None):
     avg_tower_gradients = average_gradients(gradients)
 
     # Add summaries of all variables and gradients to log
-    log_grads_and_vars(avg_tower_gradients)
+    # log_grads_and_vars(avg_tower_gradients)
 
     # Op to merge all summaries for the summary hook
     merge_all_summaries_op = tf.summary.merge_all()
@@ -1572,6 +1591,9 @@ def train(server=None):
     if FLAGS.train and FLAGS.max_to_keep > 0:
         saver = tf.train.Saver(max_to_keep=FLAGS.max_to_keep)
         hooks.append(tf.train.CheckpointSaverHook(checkpoint_dir=FLAGS.checkpoint_dir, save_secs=FLAGS.checkpoint_secs, saver=saver))
+
+    global best_validation_saver
+    best_validation_saver = tf.train.Saver(max_to_keep=1)
 
     if len(FLAGS.initialize_from_frozen_model) > 0:
         with tf.gfile.FastGFile(FLAGS.initialize_from_frozen_model, 'rb') as fin:
@@ -1640,6 +1662,8 @@ def train(server=None):
 
         update_progressbar.current_job_index += 1
 
+    global train_session
+
     # The MonitoredTrainingSession takes care of session initialization,
     # restoring from a checkpoint, saving to a checkpoint, and closing when done
     # or an error occurs.
@@ -1651,6 +1675,8 @@ def train(server=None):
                                                save_checkpoint_secs=None, # already taken care of by a hook
                                                config=session_config) as session:
             tf.get_default_graph().finalize()
+
+            train_session = session
 
             if len(FLAGS.initialize_from_frozen_model) > 0:
                 log_info('Initializing from frozen model: {}'.format(FLAGS.initialize_from_frozen_model))
@@ -1963,3 +1989,4 @@ def main(_) :
 if __name__ == '__main__' :
     create_flags()
     tf.app.run(main)
+
