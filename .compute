@@ -9,18 +9,19 @@ python3 -u DeepSpeech.py \
   --dev_files "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-dev-clean.csv" \
   --test_files "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.csv" \
   --train_batch_size 24 \
-  --dev_batch_size 48 \
+  --dev_batch_size 24 \
   --test_batch_size 48 \
   --noearly_stop \
   --epoch 30 \
   --validation_step 1 \
   --learning_rate 0.0001 \
+  --dropout_rate 0 \
   --checkpoint_dir "../keep" \
   --summary_dir "../keep/summaries" \
   --decoder_library_path "../tmp/libctc_decoder_with_kenlm.so" \
-  --train_cached_features_path "../keep/fisher_librifox_swb-train-lt550000.hdf5" \
-  --dev_cached_features_path "../keep/librivox-dev-clean.hdf5" \
-  --test_cached_features_path "../keep/librivox-test-clean.hdf5" \
+  --train_cached_features_path "/snakepit/shared/data/mozilla/DeepSpeech/fisher_librivox_swb-train-lt550000.hdf5" \
+  --dev_cached_features_path "/snakepit/shared/data/mozilla/DeepSpeech/librivox-dev-clean.hdf5" \
+  --test_cached_features_path "/snakepit/shared/data/mozilla/DeepSpeech/librivox-test-clean.hdf5" \
   "$@"
 
 # python3 -u DeepSpeech.py \

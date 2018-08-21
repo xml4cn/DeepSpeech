@@ -488,7 +488,7 @@ def decode_with_lm(inputs, sequence_length, beam_width=100,
       custom_op_module.ctc_beam_search_decoder_with_lm(
           inputs, sequence_length, beam_width=beam_width,
           model_path=FLAGS.lm_binary_path, trie_path=FLAGS.lm_trie_path, alphabet_path=FLAGS.alphabet_config_path,
-          lm_weight=FLAGS.lm_weight, valid_word_count_weight=FLAGS.valid_word_count_weight,
+          lm_weight=FLAGS.lm_weight, word_count_weight=1.00, valid_word_count_weight=FLAGS.valid_word_count_weight,
           top_paths=top_paths, merge_repeated=merge_repeated))
 
   return (
@@ -520,6 +520,20 @@ def calculate_mean_edit_distance_and_loss(model_feeder, tower, dropout, reuse):
     # Calculate the logits of the batch using BiRNN
     logits, _ = BiRNN(batch_x, batch_seq_len, dropout, reuse)
 
+    with tf.variable_scope("means_sd") as m_sd:
+        sds_ = [tf.get_variable("sds_" + str(k),
+            initializer=tf.random_uniform(v.shape, minval=0, maxval=0), trainable=False)
+            for k, v in enumerate(tf.trainable_variables())]
+        #trains = [v for v in tf.trainable_variables()]
+        apply_ = []
+        for k in range(len(tf.trainable_variables())):
+            dist = tf.distributions.Normal(
+                loc=tf.trainable_variables()[k], scale=sds_[k])
+            new_trainable = tf.reshape(dist.sample([1]),
+                tf.trainable_variables()[k].shape)
+            
+            apply_.append(tf.assign(tf.trainable_variables()[k], new_trainable))
+
     # Compute the CTC loss using either TensorFlow's `ctc_loss` or Baidu's `warp_ctc_loss`.
     if FLAGS.use_warpctc:
         total_loss = tf.contrib.warpctc.warp_ctc_loss(labels=batch_y, inputs=logits, sequence_length=batch_seq_len)
@@ -545,7 +559,7 @@ def calculate_mean_edit_distance_and_loss(model_feeder, tower, dropout, reuse):
     # - the recognition mean edit distance,
     # - the decoded batch and
     # - the original batch_y (which contains the verified transcriptions).
-    return total_loss, avg_loss, distance, mean_edit_distance, decoded, batch_y
+    return total_loss, avg_loss, distance, mean_edit_distance, decoded, batch_y, sds_, apply_, m_sd
 
 
 # Adam Optimization
@@ -623,6 +637,9 @@ def get_tower_results(model_feeder, optimizer):
     # To calculate the mean of the losses
     tower_avg_losses = []
 
+    tower_applies = []
+    tower_sd_asns = []
+
     with tf.variable_scope(tf.get_variable_scope()):
         # Loop over available_devices
         for i in range(len(available_devices)):
@@ -636,7 +653,7 @@ def get_tower_results(model_feeder, optimizer):
                 with tf.name_scope('tower_%d' % i) as scope:
                     # Calculate the avg_loss and mean_edit_distance and retrieve the decoded
                     # batch along with the original batch's labels (Y) of this tower
-                    total_loss, avg_loss, distance, mean_edit_distance, decoded, labels = \
+                    total_loss, avg_loss, distance, mean_edit_distance, decoded, labels, sds_, applies, m_sd = \
                         calculate_mean_edit_distance_and_loss(model_feeder, i, dropout_rates, reuse=i>0)
 
                     # Allow for variables to be re-used by the next tower
@@ -654,11 +671,31 @@ def get_tower_results(model_feeder, optimizer):
                     # Retain tower's total losses
                     tower_total_losses.append(total_loss)
 
+                    tower_applies.extend(applies)
+
                     # Compute gradients for model parameters using tower's mini-batch
-                    gradients = optimizer.compute_gradients(avg_loss)
+                    grads_and_vars = optimizer.compute_gradients(avg_loss)
+
+                    vars_with_grad = [v for g, v in grads_and_vars if g is not None]
+                    if not vars_with_grad:
+                      raise ValueError(
+                        "No gradients provided for any variable, check your graph for ops"
+                        " that do not support gradients, between variables %s and loss %s." %
+                        ([str(v) for _, v in grads_and_vars], l2_loss))
+
+                    sd_asn = []
+                    with tf.variable_scope(m_sd.original_name_scope):
+                        for k, (g, v) in enumerate(grads_and_vars):
+                            sd_tmp = tf.multiply(tf.constant(
+                                0.01, dtype=tf.float32), tf.add(
+                                tf.abs(tf.multiply(tf.constant(0.1,
+                                dtype=tf.float32), g)), sds_[k]))
+                            sd_asn.append(tf.assign(sds_[k], sd_tmp))
+
+                    tower_sd_asns.extend(sd_asn)
 
                     # Retain tower's gradients
-                    tower_gradients.append(gradients)
+                    tower_gradients.append(grads_and_vars)
 
                     # Retain tower's mean edit distance
                     tower_mean_edit_distances.append(mean_edit_distance)
@@ -674,7 +711,7 @@ def get_tower_results(model_feeder, optimizer):
     return (tower_labels, tower_decodings, tower_distances, tower_total_losses), \
            tower_gradients, \
            tf.reduce_mean(tower_mean_edit_distances, 0), \
-           avg_loss_across_towers
+           avg_loss_across_towers, tower_applies, tower_sd_asns
 
 
 def average_gradients(tower_gradients):
@@ -1530,7 +1567,7 @@ def train(server=None):
                                                    total_num_replicas=FLAGS.replicas)
 
     # Get the data_set specific graph end-points
-    results_tuple, gradients, mean_edit_distance, loss = get_tower_results(model_feeder, optimizer)
+    results_tuple, gradients, mean_edit_distance, loss, applies, sd_asns = get_tower_results(model_feeder, optimizer)
 
     # Average tower gradients across GPUs
     avg_tower_gradients = average_gradients(gradients)
@@ -1717,9 +1754,6 @@ def train(server=None):
                     # Initialize loss aggregator
                     total_loss = 0.0
 
-                    # Setting the training operation in case of training requested
-                    train_op = apply_gradient_op if is_train else []
-
                     # Requirements to display a WER report
                     if job.report:
                         # Reset mean edit distance
@@ -1743,7 +1777,9 @@ def train(server=None):
 
                         log_debug('Starting batch...')
                         # Compute the batch
-                        _, current_step, batch_loss, batch_report, step_summary = session.run([train_op, global_step, loss, report_params, step_summaries_op], **extra_params)
+                        if is_train:
+                            session.run(applies + sd_asns + [apply_gradient_op], **extra_params)
+                        current_step, batch_loss, batch_report, step_summary = session.run([global_step, loss, report_params, step_summaries_op], **extra_params)
 
                         # Log step summaries
                         step_summary_writer.add_summary(step_summary, current_step)
