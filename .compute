@@ -17,7 +17,6 @@ python3 -u DeepSpeech.py \
   --epoch 1 \
   --validation_step 1 \
   --learning_rate 0.0001 \
-  --dropout_rate 0 \
   --checkpoint_dir "../keep" \
   --summary_dir "../keep/summaries" \
   --decoder_library_path "../tmp/libctc_decoder_with_kenlm.so" \
