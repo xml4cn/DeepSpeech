@@ -488,7 +488,7 @@ def decode_with_lm(inputs, sequence_length, beam_width=100,
       custom_op_module.ctc_beam_search_decoder_with_lm(
           inputs, sequence_length, beam_width=beam_width,
           model_path=FLAGS.lm_binary_path, trie_path=FLAGS.lm_trie_path, alphabet_path=FLAGS.alphabet_config_path,
-          lm_weight=FLAGS.lm_weight, valid_word_count_weight=FLAGS.valid_word_count_weight,
+          lm_weight=FLAGS.lm_weight, word_count_weight=1.00, valid_word_count_weight=FLAGS.valid_word_count_weight,
           top_paths=top_paths, merge_repeated=merge_repeated))
 
   return (
@@ -1510,6 +1510,9 @@ def train(server=None):
                        limit=FLAGS.limit_test,
                        next_index=lambda i: COORD.get_next_index('test'),
                        hdf5_cache_path=FLAGS.test_cached_features_path)
+
+    # print('Finished feature caching.')
+    # exit(0)
 
     # Combining all sets to a multi set model feeder
     model_feeder = ModelFeeder(train_set,
