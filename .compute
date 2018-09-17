@@ -13,7 +13,7 @@ all_model_checkpoint_paths: "best_validation"' > ../keep/checkpoint
 python3 -u DeepSpeech.py \
   --train_files "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.csv" \
   --dev_files "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.csv" \
-  --test_files "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-other.csv" \
+  --test_files "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.csv" \
   --train_batch_size 24 \
   --dev_batch_size 48 \
   --test_batch_size 48 \
@@ -28,7 +28,8 @@ python3 -u DeepSpeech.py \
   --summary_dir "../keep/summaries" \
   --decoder_library_path "../tmp/libctc_decoder_with_kenlm.so" \
   --train_cached_features_path "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.hdf5" \
-  --dev_cached_features_path "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.hdf5"
+  --dev_cached_features_path "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.hdf5" \
+  --test_cached_features_path "/snakepit/shared/data/OpenSLR/LibriSpeech/librivox-test-clean.hdf5"
 
 # python3 -u DeepSpeech.py \
 #   --train_files "/snakepit/shared/data/mozilla/DeepSpeech/fisher_librivox_swb-train_lt550000.csv,/snakepit/shared/data/mozilla/CommonVoice/v2.0-alpha1.0/en/cv_en_valid_train.csv" \
